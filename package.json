@@ -1,6 +1,6 @@
 {
   "name": "ohmyinsite",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "OHMYINSITE - Executive Technical Document RAG Assistant",
   "main": "dist/main.js",
   "scripts": {
