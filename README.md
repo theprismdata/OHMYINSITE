@@ -73,7 +73,7 @@ DIFY_API_URL=http://192.168.0.2:5001/v1
 DIFY_API_KEY=app-your-api-key
 
 # vLLM 서버 설정
-LLM_BASE_URL=http://10.10.41.160:8080/v1
+LLM_BASE_URL=http://192.168.0.2:8080/v1
 LLM_MODEL=cen-35b
 
 # OpenAI 설정 (선택)
