@@ -37,12 +37,34 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const dotenv = __importStar(require("dotenv"));
-dotenv.config({ override: true });
 const electron_1 = require("electron");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const child_process_1 = require("child_process");
 const docs_tools_1 = require("./docs-tools");
+function loadEnvFile() {
+    const candidates = [
+        process.env.ENV_FILE?.trim(),
+        path_1.default.join(process.cwd(), '.env'),
+        path_1.default.join(path_1.default.dirname(process.execPath), '.env'),
+        (process.resourcesPath ? path_1.default.join(process.resourcesPath, '.env') : null),
+        (process.env.HOME ? path_1.default.join(process.env.HOME, 'Library', 'Application Support', 'ohmyinsite', '.env') : null),
+    ]
+        .filter((p) => !!p);
+    for (const p of candidates) {
+        try {
+            if (!fs_1.default.existsSync(p))
+                continue;
+            dotenv.config({ path: p, override: true });
+            return;
+        }
+        catch {
+            // continue
+        }
+    }
+    dotenv.config({ override: true });
+}
+loadEnvFile();
 // ── 환경변수 ───────────────────────────────────────────────────────────────────
 const DIFY_MODE = (process.env.DIFY_MODE ?? 'false') === 'true';
 const APP_TITLE = process.env.APP_TITLE?.trim() || 'OHMYINSITE';
@@ -53,11 +75,18 @@ const DIFY_SESSION_TOKEN = process.env.DIFY_SESSION_TOKEN ?? '';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? '';
 const ANTHROPIC_SESSION_TOKEN = process.env.ANTHROPIC_SESSION_TOKEN ?? '';
+const GOOGLE_LLM_API_KEY = process.env.GOOGLE_LLM_API_KEY ?? process.env.GOOGLE_API_KEY ?? '';
+const VLLM_API_KEY = process.env.VLLM_API_KEY ?? '';
 const LLM_BASE_URL = process.env.LLM_BASE_URL;
+const GOOGLE_LLM_BASE_URL = process.env.GOOGLE_LLM_BASE_URL ?? 'https://generativelanguage.googleapis.com/v1beta/openai';
 const OPENAI_USE_CUSTOM_BASE_URL = (process.env.OPENAI_USE_CUSTOM_BASE_URL ?? 'false') === 'true';
 const LLM_MODEL = process.env.LLM_MODEL ?? '';
 const MCP_URL = `http://localhost:${process.env.MCP_PORT ?? '8001'}/mcp`;
 const CHAT_REQUEST_TIMEOUT_MS = Number(process.env.CHAT_REQUEST_TIMEOUT_MS ?? '90000');
+function getSavedModelSettings() {
+    const s = loadAppSettings();
+    return s.model ?? {};
+}
 function getSavedProviderAuth(provider) {
     const s = loadAppSettings();
     return s.auth?.[provider] ?? {};
@@ -82,6 +111,21 @@ function resolveProviderCredential(provider) {
             return { token: saved.sessionToken, source: 'session' };
         return null;
     }
+    if (provider === 'google') {
+        if (GOOGLE_LLM_API_KEY)
+            return { token: GOOGLE_LLM_API_KEY, source: 'api_key' };
+        if (saved.apiKey)
+            return { token: saved.apiKey, source: 'api_key' };
+        return null;
+    }
+    if (provider === 'vllm') {
+        if (VLLM_API_KEY)
+            return { token: VLLM_API_KEY, source: 'api_key' };
+        if (saved.apiKey)
+            return { token: saved.apiKey, source: 'api_key' };
+        // vLLM은 인증 없이도 쓰는 경우가 많아 더미 키 허용
+        return { token: 'EMPTY', source: 'api_key' };
+    }
     if (DIFY_API_KEY)
         return { token: DIFY_API_KEY, source: 'api_key' };
     if (saved.apiKey)
@@ -92,12 +136,24 @@ function resolveProviderCredential(provider) {
         return { token: saved.sessionToken, source: 'session' };
     return null;
 }
-function resolveOpenAIBaseURL() {
-    // GPT 기본은 OpenAI 공식 API를 사용하고, 명시적으로 켠 경우에만 커스텀 baseURL 사용
-    if (!OPENAI_USE_CUSTOM_BASE_URL)
-        return undefined;
-    const trimmed = (LLM_BASE_URL ?? '').trim();
-    return trimmed || undefined;
+function resolveBaseURL(provider) {
+    const settings = getSavedModelSettings();
+    if (provider === 'google') {
+        const trimmed = (settings.googleBaseUrl ?? GOOGLE_LLM_BASE_URL ?? '').trim();
+        return trimmed || undefined;
+    }
+    if (provider === 'vllm') {
+        const trimmed = (settings.vllmBaseUrl ?? LLM_BASE_URL ?? '').trim();
+        return trimmed || undefined;
+    }
+    if (provider === 'openai') {
+        const useCustom = settings.openaiUseCustomBaseUrl ?? OPENAI_USE_CUSTOM_BASE_URL;
+        if (!useCustom)
+            return undefined;
+        const trimmed = (settings.openaiBaseUrl ?? LLM_BASE_URL ?? '').trim();
+        return trimmed || undefined;
+    }
+    return undefined;
 }
 function resolveAppIconPath() {
     const candidates = [
@@ -130,20 +186,57 @@ async function withTimeout(promise, timeoutMs, timeoutMessage) {
     }
 }
 // ── 모델 목록 & 현재 모델 ─────────────────────────────────────────────────────
-const AVAILABLE_MODELS = [
+const OPENAI_MODELS = [
+    { id: 'gpt-5.3-codex', name: 'GPT-5.3-Codex', provider: 'openai' },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2-Codex', provider: 'openai' },
     { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'openai' },
     { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai' },
+];
+const ANTHROPIC_MODELS = [
     { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', provider: 'anthropic' },
     { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic' },
     { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', provider: 'anthropic' },
 ];
-if (DIFY_MODE) {
-    AVAILABLE_MODELS.unshift({ id: 'dify-agent', name: 'Dify Agent', provider: 'dify' });
+const GOOGLE_MODELS = [
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'google' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google' },
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google' },
+];
+const BASE_MODELS = [...OPENAI_MODELS, ...ANTHROPIC_MODELS, ...GOOGLE_MODELS];
+function buildAvailableModels() {
+    const list = [...BASE_MODELS];
+    if (DIFY_MODE) {
+        list.unshift({ id: 'dify-agent', name: 'Dify Agent', provider: 'dify' });
+    }
+    const settings = getSavedModelSettings();
+    const vllmModelId = (settings.vllmModelId ?? '').trim() || 'CEN-35B';
+    if (vllmModelId && !list.some((m) => m.id === vllmModelId && m.provider === 'vllm')) {
+        list.unshift({
+            id: vllmModelId,
+            name: `vLLM (${vllmModelId})`,
+            provider: 'vllm',
+        });
+    }
+    return list;
 }
-let currentModel = AVAILABLE_MODELS.find((m) => m.id === LLM_MODEL)
-    ?? (DIFY_MODE ? AVAILABLE_MODELS.find((m) => m.provider === 'dify') : undefined)
-    ?? AVAILABLE_MODELS[0];
+function resolveInitialModel(models) {
+    const settings = getSavedModelSettings();
+    const preferred = (settings.selectedModelId ?? '').trim();
+    const envPreferred = (LLM_MODEL ?? '').trim();
+    const preferredProvider = settings.selectedProvider;
+    if (preferredProvider) {
+        const byProvider = models.find((m) => m.provider === preferredProvider && m.id === preferred);
+        if (byProvider)
+            return byProvider;
+    }
+    return models.find((m) => m.id === preferred)
+        ?? models.find((m) => m.id === envPreferred)
+        ?? (DIFY_MODE ? models.find((m) => m.provider === 'dify') : undefined)
+        ?? models[0];
+}
+let availableModels = buildAvailableModels();
+let currentModel = resolveInitialModel(availableModels);
 // ── 앱 로그(파일) ─────────────────────────────────────────────────────────────
 let appLogFilePath = null;
 function getAppLogFilePath() {
@@ -236,65 +329,83 @@ let mcpServerProcess = null;
 let mcpServerSpawnedByApp = false;
 async function startMcpServer() {
     const serverScript = path_1.default.join(__dirname, 'mcp-server.js');
-    const nodeBin = process.env.NODE_BINARY ?? 'node';
-    mcpServerProcess = (0, child_process_1.spawn)(nodeBin, [serverScript], {
-        env: { ...process.env },
-        stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    mcpServerSpawnedByApp = true;
-    mcpServerProcess.stdout?.on('data', (data) => {
-        const line = data.toString().trim();
-        console.log(`[MCP-Server] ${line}`);
-        appendAppLog('INFO', '[MCP-Server] stdout', line);
-    });
-    mcpServerProcess.stderr?.on('data', (data) => {
-        const line = data.toString().trim();
-        console.error(`[MCP-Server] ${line}`);
-        appendAppLog('ERROR', '[MCP-Server] stderr', line);
-    });
-    mcpServerProcess.on('exit', (code) => {
-        console.log(`[MCP-Server] 종료 (exit code: ${code})`);
-        appendAppLog('WARN', '[MCP-Server] exited', { code });
-        if (mcpServerProcess && code !== 0 && code !== null) {
+    const launchPlans = electron_1.app.isPackaged
+        ? [
+            { bin: process.execPath, envExtra: { ELECTRON_RUN_AS_NODE: '1' }, label: 'electron-as-node' },
+            { bin: process.env.NODE_BINARY?.trim() || 'node', envExtra: {}, label: 'node' },
+        ]
+        : [
+            { bin: process.env.NODE_BINARY?.trim() || 'node', envExtra: {}, label: 'node' },
+            { bin: process.execPath, envExtra: { ELECTRON_RUN_AS_NODE: '1' }, label: 'electron-as-node' },
+        ];
+    let lastError = null;
+    for (const plan of launchPlans) {
+        try {
+            appendAppLog('INFO', 'MCP launch attempt', { label: plan.label, bin: plan.bin });
+            mcpServerProcess = (0, child_process_1.spawn)(plan.bin, [serverScript], {
+                env: { ...process.env, ...plan.envExtra },
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            mcpServerSpawnedByApp = true;
+            mcpServerProcess.stdout?.on('data', (data) => {
+                const line = data.toString().trim();
+                console.log(`[MCP-Server] ${line}`);
+                appendAppLog('INFO', '[MCP-Server] stdout', line);
+            });
+            mcpServerProcess.stderr?.on('data', (data) => {
+                const line = data.toString().trim();
+                console.error(`[MCP-Server] ${line}`);
+                appendAppLog('ERROR', '[MCP-Server] stderr', line);
+            });
+            mcpServerProcess.on('exit', (code) => {
+                console.log(`[MCP-Server] 종료 (exit code: ${code})`);
+                appendAppLog('WARN', '[MCP-Server] exited', { code });
+                if (mcpServerProcess && code !== 0 && code !== null) {
+                    mcpServerSpawnedByApp = false;
+                }
+            });
+            const startError = new Promise((_, reject) => {
+                mcpServerProcess.once('error', (err) => reject(err));
+            });
+            const earlyExit = new Promise((_, reject) => {
+                mcpServerProcess.once('exit', (code) => {
+                    if (code !== 0 && code !== null) {
+                        reject(new Error(`MCP 서버가 바로 종료되었습니다 (exit ${code}). 포트 ${process.env.MCP_PORT ?? '8001'} 사용 중이면 별도 터미널의 mcp-server를 종료하세요.`));
+                    }
+                });
+            });
+            const waitReady = new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('MCP 서버 시작 타임아웃(5초)')), 5000);
+                const check = setInterval(async () => {
+                    try {
+                        const res = await fetch(MCP_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: '{}',
+                        });
+                        if (res.status !== 404) {
+                            clearInterval(check);
+                            clearTimeout(timeout);
+                            resolve();
+                        }
+                    }
+                    catch {
+                        // 아직 미준비
+                    }
+                }, 200);
+            });
+            await Promise.race([startError, earlyExit, waitReady]);
+            return;
+        }
+        catch (e) {
+            lastError = e;
+            appendAppLog('WARN', 'MCP launch attempt failed', { label: plan.label, error: lastError.message });
+            mcpServerProcess?.kill();
+            mcpServerProcess = null;
             mcpServerSpawnedByApp = false;
         }
-    });
-    const earlyExit = new Promise((_, reject) => {
-        mcpServerProcess.once('exit', (code) => {
-            if (code !== 0 && code !== null) {
-                reject(new Error(`MCP 서버가 바로 종료되었습니다 (exit ${code}). 포트 ${process.env.MCP_PORT ?? '8001'} 사용 중이면 별도 터미널의 mcp-server를 종료하세요.`));
-            }
-        });
-    });
-    const waitReady = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('MCP 서버 시작 타임아웃(5초)')), 5000);
-        const check = setInterval(async () => {
-            try {
-                const res = await fetch(MCP_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: '{}',
-                });
-                if (res.status !== 404) {
-                    clearInterval(check);
-                    clearTimeout(timeout);
-                    resolve();
-                }
-            }
-            catch {
-                // 아직 미준비
-            }
-        }, 200);
-    });
-    try {
-        await Promise.race([earlyExit, waitReady]);
     }
-    catch (e) {
-        mcpServerProcess?.kill();
-        mcpServerProcess = null;
-        mcpServerSpawnedByApp = false;
-        throw e;
-    }
+    throw lastError ?? new Error('MCP 서버 시작에 실패했습니다.');
 }
 async function checkMcpServerRunning() {
     try {
@@ -655,7 +766,7 @@ async function runDifyAgent(userMessage, onChunk, agentId, shouldStop = () => fa
     }
     const credential = resolveProviderCredential('dify');
     if (!credential) {
-        throw new Error('Dify 인증 정보가 없습니다. .env의 DIFY_API_KEY 또는 DIFY_SESSION_TOKEN을 설정하세요.');
+        throw new Error('Dify 인증 정보가 없습니다. 앱에서 인증 정보를 입력해 주세요.');
     }
     appendAppLog('INFO', 'Dify auth mode', { source: credential.source });
     const agent = AGENTS[agentId ?? 'tech-trend'] ?? AGENTS['tech-trend'];
@@ -749,17 +860,24 @@ async function runDifyAgent(userMessage, onChunk, agentId, shouldStop = () => fa
     }
 }
 // ── OpenAI Agent 호출 ─────────────────────────────────────────────────────────
-async function runOpenAIAgent(messages, onChunk, agentId, systemPromptOverride, shouldStop = () => false) {
+async function runOpenAIAgent(messages, onChunk, agentId, systemPromptOverride, provider = 'openai', shouldStop = () => false) {
     if (!mcpClient)
         throw new Error('MCP 서버에 연결되지 않았습니다.');
-    const credential = resolveProviderCredential('openai');
+    const credential = resolveProviderCredential(provider);
     if (!credential) {
-        throw new Error('OpenAI API 키가 없습니다. .env의 OPENAI_API_KEY를 설정하세요.');
+        if (provider === 'google') {
+            throw new Error('Google 인증 정보가 없습니다. 앱에서 인증 정보를 입력해 주세요.');
+        }
+        if (provider === 'vllm') {
+            throw new Error('vLLM 설정이 올바르지 않습니다. 모델 설정에서 주소/모델을 확인해 주세요.');
+        }
+        throw new Error('OpenAI API 키가 없습니다. 앱에서 인증 정보를 입력해 주세요.');
     }
-    appendAppLog('INFO', 'OpenAI auth mode', { source: credential.source });
-    const baseURL = resolveOpenAIBaseURL();
-    appendAppLog('INFO', 'OpenAI target', {
-        baseURL: baseURL ?? 'https://api.openai.com/v1',
+    appendAppLog('INFO', 'OpenAI-compatible auth mode', { provider, source: credential.source });
+    const baseURL = resolveBaseURL(provider);
+    appendAppLog('INFO', 'OpenAI-compatible target', {
+        provider,
+        baseURL: baseURL ?? 'https://api.openai.com/v1 (default)',
         model: currentModel.id,
     });
     const OpenAI = (await Promise.resolve().then(() => __importStar(require('openai')))).default;
@@ -773,15 +891,116 @@ async function runOpenAIAgent(messages, onChunk, agentId, systemPromptOverride, 
         { role: 'system', content: systemPrompt },
         ...messages,
     ];
+    let effectiveModel = currentModel.id;
+    let downgradedToStable = false;
+    const isCodexModel = (modelId) => /codex/i.test(modelId);
+    const isServer5xx = (err) => {
+        const status = Number(err?.status ?? 0);
+        if (status >= 500 && status < 600)
+            return true;
+        const msg = String(err?.message ?? err ?? '');
+        return /\b5\d\d\b/.test(msg);
+    };
+    const runResponsesCodex = async () => {
+        const input = [
+            { role: 'system', content: systemPrompt },
+            ...messages
+                .filter((m) => m?.role === 'user' || m?.role === 'assistant')
+                .map((m) => ({ role: m.role, content: String(m.content ?? '') })),
+        ];
+        const response = await openai.responses.create({
+            model: effectiveModel,
+            input,
+            stream: false,
+        });
+        const text = String(response?.output_text ?? '').trim();
+        if (text) {
+            onChunk({ type: 'text', text });
+            return;
+        }
+        const joined = Array.isArray(response?.output)
+            ? response.output
+                .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+                .map((c) => c?.text?.value ?? c?.text ?? '')
+                .filter(Boolean)
+                .join('\n')
+            : '';
+        if (joined)
+            onChunk({ type: 'text', text: joined });
+    };
+    if (provider === 'openai' && isCodexModel(effectiveModel)) {
+        appendAppLog('INFO', 'codex model selected; using responses API path', { model: effectiveModel });
+        await runResponsesCodex();
+        return;
+    }
+    const buildCompletionPrompt = () => {
+        const lines = [];
+        lines.push(`[SYSTEM]\n${systemPrompt}\n`);
+        for (const m of messages) {
+            const role = String(m?.role ?? 'user').toUpperCase();
+            const content = String(m?.content ?? '');
+            lines.push(`[${role}]\n${content}\n`);
+        }
+        lines.push('[ASSISTANT]\n');
+        return lines.join('\n');
+    };
+    const runCompletionFallback = async (modelId) => {
+        const prompt = buildCompletionPrompt();
+        const stream = await openai.completions.create({
+            model: modelId,
+            prompt,
+            stream: true,
+            max_tokens: 4096,
+        });
+        for await (const chunk of stream) {
+            throwIfStopped(shouldStop);
+            const text = chunk?.choices?.[0]?.text;
+            if (text)
+                onChunk({ type: 'text', text });
+        }
+    };
     while (true) {
         throwIfStopped(shouldStop);
-        const stream = await openai.chat.completions.create({
-            model: currentModel.id,
-            messages: conversation,
-            tools: openaiTools,
-            tool_choice: 'auto',
-            stream: true,
-        });
+        let stream;
+        try {
+            stream = await openai.chat.completions.create({
+                model: effectiveModel,
+                messages: conversation,
+                tools: openaiTools,
+                tool_choice: 'auto',
+                stream: true,
+            });
+        }
+        catch (e) {
+            const msg = String(e?.message ?? e);
+            const isNotChatModel = msg.includes('not a chat model') || msg.includes('/v1/chat/completions');
+            if (isNotChatModel) {
+                appendAppLog('WARN', 'chat.completions unsupported; fallback to completions', {
+                    provider,
+                    model: effectiveModel,
+                });
+                try {
+                    await runCompletionFallback(effectiveModel);
+                    return;
+                }
+                catch (fallbackErr) {
+                    if (isServer5xx(fallbackErr) && isCodexModel(effectiveModel) && !downgradedToStable) {
+                        downgradedToStable = true;
+                        effectiveModel = 'gpt-4.1';
+                        onChunk({ type: 'text', text: '\n\n(안내) Codex 모델 오류로 GPT-4.1로 자동 전환해 재시도합니다.\n' });
+                        continue;
+                    }
+                    throw fallbackErr;
+                }
+            }
+            if (isServer5xx(e) && isCodexModel(effectiveModel) && !downgradedToStable) {
+                downgradedToStable = true;
+                effectiveModel = 'gpt-4.1';
+                onChunk({ type: 'text', text: '\n\n(안내) Codex 모델 오류로 GPT-4.1로 자동 전환해 재시도합니다.\n' });
+                continue;
+            }
+            throw e;
+        }
         let fullContent = '';
         const toolCalls = [];
         for await (const chunk of stream) {
@@ -841,7 +1060,7 @@ async function runAnthropicAgent(messages, onChunk, agentId, systemPromptOverrid
         throw new Error('MCP 서버에 연결되지 않았습니다.');
     const credential = resolveProviderCredential('anthropic');
     if (!credential) {
-        throw new Error('Anthropic 인증 정보가 없습니다. .env의 ANTHROPIC_API_KEY 또는 ANTHROPIC_SESSION_TOKEN을 설정하세요.');
+        throw new Error('Anthropic 인증 정보가 없습니다. 앱에서 인증 정보를 입력해 주세요.');
     }
     appendAppLog('INFO', 'Anthropic auth mode', { source: credential.source });
     const { default: Anthropic } = await Promise.resolve().then(() => __importStar(require('@anthropic-ai/sdk')));
@@ -972,7 +1191,7 @@ async function runLLMAgent(messages, onChunk, agentId, systemPromptOverride, mod
         const agent = AGENTS[agentId ?? 'tech-trend'] ?? AGENTS['tech-trend'];
         const promptBase = systemPromptOverride ?? agent.systemPrompt;
         const enhancedPrompt = buildIntentPrompt(promptBase, intentDecision.intent, mode, userQuery);
-        await runOpenAIAgent(messages, onChunk, agentId, enhancedPrompt, shouldStop);
+        await runOpenAIAgent(messages, onChunk, agentId, enhancedPrompt, currentModel.provider, shouldStop);
     }
 }
 // ── 태스크 관리 ───────────────────────────────────────────────────────────────
@@ -1170,20 +1389,121 @@ electron_1.ipcMain.on('stop-message', (event) => {
     appendAppLog('INFO', 'stop-message requested', { senderId });
 });
 // 모델 IPC
-electron_1.ipcMain.handle('get-models', () => AVAILABLE_MODELS);
+electron_1.ipcMain.handle('get-models', () => availableModels);
 electron_1.ipcMain.handle('get-current-model', () => currentModel);
 electron_1.ipcMain.handle('set-model', (_event, modelId) => {
-    const model = AVAILABLE_MODELS.find((m) => m.id === modelId);
+    const model = availableModels.find((m) => m.id === modelId);
     if (model) {
         currentModel = model;
+        const prev = loadAppSettings();
+        const prevModel = prev.model ?? {};
+        saveAppSettings({
+            ...prev,
+            model: {
+                ...prevModel,
+                selectedProvider: model.provider,
+                selectedModelId: model.id,
+            },
+        });
         console.log(`[Model] 변경됨: ${model.name}`);
         return { ok: true };
     }
     return { ok: false };
 });
+electron_1.ipcMain.handle('get-model-settings', () => {
+    const settings = getSavedModelSettings();
+    const selectedProvider = settings.selectedProvider ?? currentModel.provider;
+    return {
+        selectedProvider,
+        selectedModelId: currentModel.id,
+        openaiModelId: (settings.openaiModelId ?? OPENAI_MODELS[0].id).trim(),
+        anthropicModelId: (settings.anthropicModelId ?? ANTHROPIC_MODELS[0].id).trim(),
+        googleModelId: (settings.googleModelId ?? GOOGLE_MODELS[0].id).trim(),
+        vllmModelId: (settings.vllmModelId ?? 'CEN-35B').trim(),
+        vllmBaseUrl: (settings.vllmBaseUrl ?? LLM_BASE_URL ?? '').trim(),
+        googleBaseUrl: (settings.googleBaseUrl ?? GOOGLE_LLM_BASE_URL ?? '').trim(),
+        openaiUseCustomBaseUrl: settings.openaiUseCustomBaseUrl ?? OPENAI_USE_CUSTOM_BASE_URL,
+        openaiBaseUrl: (settings.openaiBaseUrl ?? LLM_BASE_URL ?? '').trim(),
+    };
+});
+electron_1.ipcMain.handle('save-model-settings', (_event, input) => {
+    const selectedProvider = input.selectedProvider;
+    const selectedModelId = (input.selectedModelId ?? '').trim();
+    const openaiModelId = (input.openaiModelId ?? '').trim();
+    const anthropicModelId = (input.anthropicModelId ?? '').trim();
+    const googleModelId = (input.googleModelId ?? '').trim();
+    const vllmModelId = (input.vllmModelId ?? '').trim();
+    const vllmBaseUrl = (input.vllmBaseUrl ?? '').trim();
+    const googleBaseUrl = (input.googleBaseUrl ?? '').trim();
+    const openaiUseCustomBaseUrl = input.openaiUseCustomBaseUrl === true;
+    const openaiBaseUrl = (input.openaiBaseUrl ?? '').trim();
+    const prev = loadAppSettings();
+    const prevModel = prev.model ?? {};
+    const nextModel = {
+        ...prevModel,
+        ...(selectedProvider ? { selectedProvider } : {}),
+        ...(selectedModelId ? { selectedModelId } : {}),
+        ...(openaiModelId ? { openaiModelId } : {}),
+        ...(anthropicModelId ? { anthropicModelId } : {}),
+        ...(googleModelId ? { googleModelId } : {}),
+        ...(vllmModelId ? { vllmModelId } : {}),
+        ...(vllmBaseUrl ? { vllmBaseUrl } : {}),
+        ...(googleBaseUrl ? { googleBaseUrl } : {}),
+        openaiUseCustomBaseUrl,
+        openaiBaseUrl,
+    };
+    saveAppSettings({ ...prev, model: nextModel });
+    availableModels = buildAvailableModels();
+    if (selectedProvider && selectedModelId) {
+        const bySelection = availableModels.find((m) => m.provider === selectedProvider && m.id === selectedModelId);
+        if (bySelection)
+            currentModel = bySelection;
+    }
+    if (!availableModels.some((m) => m.id === currentModel.id && m.provider === currentModel.provider)) {
+        currentModel = resolveInitialModel(availableModels);
+    }
+    return { ok: true, models: availableModels, currentModel };
+});
 electron_1.ipcMain.handle('get-provider-auth-status', (_event, provider) => {
     const credential = resolveProviderCredential(provider);
     return { connected: !!credential, source: credential?.source ?? null };
+});
+electron_1.ipcMain.handle('get-provider-auth-preview', (_event, provider) => {
+    const credential = resolveProviderCredential(provider);
+    const token = credential?.token ?? '';
+    if (!token) {
+        return { connected: false, source: null, masked: '' };
+    }
+    const tail = token.slice(-4);
+    const masked = `********${tail}`;
+    return { connected: true, source: credential?.source ?? null, masked };
+});
+electron_1.ipcMain.handle('save-provider-auth', (_event, input) => {
+    const provider = input?.provider;
+    if (!provider || !['openai', 'anthropic', 'google', 'vllm', 'dify'].includes(provider)) {
+        return { ok: false, error: '유효하지 않은 provider입니다.' };
+    }
+    const apiKey = (input.apiKey ?? '').trim();
+    const sessionToken = (input.sessionToken ?? '').trim();
+    if (!apiKey && !sessionToken) {
+        return { ok: false, error: '저장할 인증 값이 없습니다.' };
+    }
+    const prev = loadAppSettings();
+    const prevAuth = prev.auth ?? {};
+    const nextAuth = {
+        ...prevAuth,
+        [provider]: {
+            ...(apiKey ? { apiKey } : {}),
+            ...(sessionToken ? { sessionToken } : {}),
+        },
+    };
+    saveAppSettings({ ...prev, auth: nextAuth });
+    appendAppLog('INFO', 'provider auth saved', {
+        provider,
+        apiKey: !!apiKey,
+        sessionToken: !!sessionToken,
+    });
+    return { ok: true };
 });
 // 태스크 IPC
 electron_1.ipcMain.handle('create-task', async (_event, { title, prompt, agentId }) => {

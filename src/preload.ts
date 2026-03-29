@@ -47,10 +47,44 @@ contextBridge.exposeInMainWorld('api', {
   getModels: (): Promise<ModelConfig[]> => ipcRenderer.invoke('get-models'),
   getCurrentModel: (): Promise<ModelConfig> => ipcRenderer.invoke('get-current-model'),
   setModel: (modelId: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('set-model', modelId),
+  getModelSettings: (): Promise<{
+    selectedProvider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
+    selectedModelId: string
+    openaiModelId: string
+    anthropicModelId: string
+    googleModelId: string
+    vllmModelId: string
+    vllmBaseUrl: string
+    googleBaseUrl: string
+    openaiUseCustomBaseUrl: boolean
+    openaiBaseUrl: string
+  }> => ipcRenderer.invoke('get-model-settings'),
+  saveModelSettings: (input: {
+    selectedProvider?: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
+    selectedModelId?: string
+    openaiModelId?: string
+    anthropicModelId?: string
+    googleModelId?: string
+    vllmModelId?: string
+    vllmBaseUrl?: string
+    googleBaseUrl?: string
+    openaiUseCustomBaseUrl: boolean
+    openaiBaseUrl?: string
+  }): Promise<{ ok: boolean; models: ModelConfig[]; currentModel: ModelConfig }> =>
+    ipcRenderer.invoke('save-model-settings', input),
   getProviderAuthStatus: (
-    provider: 'openai' | 'anthropic' | 'dify',
+    provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify',
   ): Promise<{ connected: boolean; source: 'api_key' | 'session' | null }> =>
     ipcRenderer.invoke('get-provider-auth-status', provider),
+  getProviderAuthPreview: (
+    provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify',
+  ): Promise<{ connected: boolean; source: 'api_key' | 'session' | null; masked: string }> =>
+    ipcRenderer.invoke('get-provider-auth-preview', provider),
+  saveProviderAuth: (
+    provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify',
+    input: { apiKey?: string; sessionToken?: string },
+  ): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('save-provider-auth', { provider, ...input }),
 
   // ── 태스크 ───────────────────────────────────────────────────────────────────
   createThread: (title: string, agentId: string): Promise<Task> =>

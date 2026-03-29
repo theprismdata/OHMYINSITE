@@ -8,11 +8,11 @@ interface Chunk {
   docTitle?: string; docText?: string
   metaKind?: 'routing'
   intent?: 'document' | 'code' | 'hybrid' | 'proposal'
-  provider?: 'openai' | 'anthropic' | 'dify'
+  provider?: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
   skillId?: string
 }
 interface MessageParam { role: 'user' | 'assistant'; content: string }
-interface ModelConfig { id: string; name: string; provider: 'openai' | 'anthropic' | 'dify' }
+interface ModelConfig { id: string; name: string; provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify' }
 type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 interface TaskLogEntry { time: string; type: 'info' | 'tool' | 'output' | 'error'; text: string }
 interface ThreadMessage { time: string; role: 'user' | 'assistant'; text: string }
@@ -37,9 +37,40 @@ interface WindowApi {
   getModels: () => Promise<ModelConfig[]>
   getCurrentModel: () => Promise<ModelConfig>
   setModel: (modelId: string) => Promise<{ ok: boolean }>
+  getModelSettings: () => Promise<{
+    selectedProvider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
+    selectedModelId: string
+    openaiModelId: string
+    anthropicModelId: string
+    googleModelId: string
+    vllmModelId: string
+    vllmBaseUrl: string
+    googleBaseUrl: string
+    openaiUseCustomBaseUrl: boolean
+    openaiBaseUrl: string
+  }>
+  saveModelSettings: (input: {
+    selectedProvider?: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
+    selectedModelId?: string
+    openaiModelId?: string
+    anthropicModelId?: string
+    googleModelId?: string
+    vllmModelId?: string
+    vllmBaseUrl?: string
+    googleBaseUrl?: string
+    openaiUseCustomBaseUrl: boolean
+    openaiBaseUrl?: string
+  }) => Promise<{ ok: boolean; models: ModelConfig[]; currentModel: ModelConfig }>
   getProviderAuthStatus: (
-    provider: 'openai' | 'anthropic' | 'dify',
+    provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify',
   ) => Promise<{ connected: boolean; source: 'api_key' | 'session' | null }>
+  getProviderAuthPreview: (
+    provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify',
+  ) => Promise<{ connected: boolean; source: 'api_key' | 'session' | null; masked: string }>
+  saveProviderAuth: (
+    provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify',
+    input: { apiKey?: string; sessionToken?: string },
+  ) => Promise<{ ok: boolean; error?: string }>
   createThread: (title: string, agentId: string) => Promise<Task>
   updateTaskTitle: (taskId: string, title: string) => Promise<{ ok: boolean; error?: string }>
   appendThreadLog: (
@@ -82,6 +113,18 @@ const docPanelContent = document.getElementById('doc-panel-content') as HTMLDivE
 const docPanelClose  = document.getElementById('doc-panel-close') as HTMLButtonElement
 const modelSelect    = document.getElementById('model-select') as HTMLSelectElement
 const modelBadge     = document.getElementById('model-provider-badge') as HTMLDivElement
+const modelSettingsBtn = document.getElementById('model-settings-btn') as HTMLButtonElement
+const modelSettingsOverlay = document.getElementById('model-settings-overlay') as HTMLDivElement
+const vllmSection = document.getElementById('openai-compatible-section') as HTMLDivElement
+const vllmModelIdInput = document.getElementById('vllm-model-id-input') as HTMLInputElement
+const vllmBaseUrlInput = document.getElementById('vllm-base-url-input') as HTMLInputElement
+const modelProviderGroupSelect = document.getElementById('model-provider-group-select') as HTMLSelectElement
+const modelProviderModelSelect = document.getElementById('model-provider-model-select') as HTMLSelectElement
+const modelProviderModelAdd = document.getElementById('model-provider-model-add') as HTMLButtonElement
+const providerApiKeyLabel = document.getElementById('provider-api-key-label') as HTMLLabelElement
+const providerApiKeyInput = document.getElementById('provider-api-key-input') as HTMLInputElement
+const modelSettingsCancel = document.getElementById('model-settings-cancel') as HTMLButtonElement
+const modelSettingsSave = document.getElementById('model-settings-save') as HTMLButtonElement
 const taskList       = document.getElementById('task-list') as HTMLDivElement
 const newTaskBtn     = document.getElementById('new-task-btn') as HTMLButtonElement
 const taskModalOverlay = document.getElementById('task-modal-overlay') as HTMLDivElement
@@ -89,6 +132,12 @@ const taskTitleInput = document.getElementById('task-title-input') as HTMLInputE
 const taskPromptInput = document.getElementById('task-prompt-input') as HTMLTextAreaElement
 const modalCancel    = document.getElementById('modal-cancel') as HTMLButtonElement
 const modalSubmit    = document.getElementById('modal-submit') as HTMLButtonElement
+const authModalOverlay = document.getElementById('auth-modal-overlay') as HTMLDivElement
+const authModalTitle = authModalOverlay.querySelector('h3') as HTMLHeadingElement
+const authHelp = document.getElementById('auth-help') as HTMLParagraphElement
+const authTokenInput = document.getElementById('auth-token-input') as HTMLInputElement
+const authCancel = document.getElementById('auth-cancel') as HTMLButtonElement
+const authSubmit = document.getElementById('auth-submit') as HTMLButtonElement
 const chatView       = document.getElementById('chat-view') as HTMLDivElement
 const taskDetailView = document.getElementById('task-detail-view') as HTMLDivElement
 const taskDetailBack = document.getElementById('task-detail-back') as HTMLButtonElement
@@ -106,11 +155,19 @@ let isSending = false
 let currentBubble: HTMLDivElement | null = null
 const DEFAULT_AGENT_ID = 'tech-trend'
 let currentAgentId: string | null = DEFAULT_AGENT_ID
-let currentProvider: 'openai' | 'anthropic' | 'dify' = 'openai'
+let currentProvider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify' = 'openai'
 let currentThreadId: string | null = null
 let currentTaskId: string | null = null
 const taskMap = new Map<string, Task>()
 const collapsedDirPaths = new Set<string>()
+let modelSettingsLoaded = false
+let currentProviderMaskedKey = ''
+const PROVIDER_MODEL_PRESETS: Record<string, string[]> = {
+  openai: ['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini'],
+  anthropic: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  google: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+  vllm: [],
+}
 
 window.api.getAppMeta().then((meta) => {
   const appTitle = (meta?.title ?? '').trim() || 'OHMYINSITE'
@@ -149,11 +206,11 @@ function showDocPreview(title: string, text: string): void {
 // ── 모델 셀렉터 ───────────────────────────────────────────────────────────────
 
 async function initModelSelector(): Promise<void> {
-  const [models, current] = await Promise.all([
-    window.api.getModels(),
-    window.api.getCurrentModel(),
-  ])
+  const [models, current] = await Promise.all([window.api.getModels(), window.api.getCurrentModel()])
+  renderModelSelector(models, current)
+}
 
+function renderModelSelector(models: ModelConfig[], current: ModelConfig): void {
   modelSelect.innerHTML = ''
   for (const m of models) {
     const opt = document.createElement('option')
@@ -167,8 +224,82 @@ async function initModelSelector(): Promise<void> {
   updateModelBadge(current.provider)
 }
 
-function updateModelBadge(provider: 'openai' | 'anthropic' | 'dify'): void {
-  modelBadge.textContent = provider === 'anthropic' ? 'Anthropic' : provider === 'dify' ? 'Dify' : 'OpenAI'
+function refreshProviderPresetModels(): void {
+  const provider = modelProviderGroupSelect.value
+  const presets = PROVIDER_MODEL_PRESETS[provider] ?? []
+  modelProviderModelSelect.innerHTML = ''
+  for (const id of presets) {
+    const opt = document.createElement('option')
+    opt.value = id
+    opt.textContent = id
+    modelProviderModelSelect.appendChild(opt)
+  }
+}
+
+function updateModelSettingsVisibilityByProvider(): void {
+  const provider = modelProviderGroupSelect.value
+  const isVllm = provider === 'vllm'
+  vllmSection.style.display = isVllm ? '' : 'none'
+  modelProviderModelSelect.disabled = isVllm
+  modelProviderModelAdd.textContent = isVllm ? '적용' : '적용'
+
+  if (provider === 'anthropic') {
+    providerApiKeyLabel.textContent = 'Anthropic API 키 (선택)'
+    providerApiKeyInput.placeholder = '예: sk-ant-...'
+  } else if (provider === 'google') {
+    providerApiKeyLabel.textContent = 'Google API 키 (선택)'
+    providerApiKeyInput.placeholder = '예: AIza...'
+  } else if (provider === 'vllm') {
+    providerApiKeyLabel.textContent = 'vLLM API 키 (선택)'
+    providerApiKeyInput.placeholder = '필요할 때만 입력'
+  } else {
+    providerApiKeyLabel.textContent = 'OpenAI API 키 (선택)'
+    providerApiKeyInput.placeholder = '예: sk-...'
+  }
+}
+
+async function refreshProviderAuthPreview(): Promise<void> {
+  const provider = modelProviderGroupSelect.value as ProviderName
+  const preview = await window.api.getProviderAuthPreview(provider)
+  currentProviderMaskedKey = preview.masked ?? ''
+  providerApiKeyInput.value = currentProviderMaskedKey
+}
+
+async function loadModelSettingsModal(): Promise<void> {
+  const settings = await window.api.getModelSettings()
+  const provider = settings.selectedProvider
+  modelProviderGroupSelect.value = ['openai', 'anthropic', 'google', 'vllm'].includes(provider)
+    ? provider
+    : 'openai'
+  refreshProviderPresetModels()
+  const providerModelMap: Record<string, string> = {
+    openai: settings.openaiModelId,
+    anthropic: settings.anthropicModelId,
+    google: settings.googleModelId,
+    vllm: settings.vllmModelId,
+  }
+  const mapped = providerModelMap[modelProviderGroupSelect.value]
+  if (mapped) {
+    const exists = Array.from(modelProviderModelSelect.options).some((o) => o.value === mapped)
+    if (exists) modelProviderModelSelect.value = mapped
+  }
+  vllmModelIdInput.value = settings.vllmModelId ?? 'CEN-35B'
+  vllmBaseUrlInput.value = settings.vllmBaseUrl ?? ''
+  updateModelSettingsVisibilityByProvider()
+  await refreshProviderAuthPreview()
+  modelSettingsLoaded = true
+}
+
+function updateModelBadge(provider: 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'): void {
+  modelBadge.textContent = provider === 'anthropic'
+    ? 'Anthropic'
+    : provider === 'google'
+      ? 'Google'
+      : provider === 'vllm'
+        ? 'vLLM'
+        : provider === 'dify'
+          ? 'Dify'
+          : 'OpenAI'
   modelBadge.className = `model-provider-badge ${provider}`
   // Fix: id is still there but className needs the right value
   modelBadge.setAttribute('id', 'model-provider-badge')
@@ -190,6 +321,107 @@ modelSelect.addEventListener('change', async () => {
     currentProvider = selected.provider
     updateModelBadge(selected.provider)
   }
+})
+
+modelSettingsBtn.addEventListener('click', async () => {
+  await loadModelSettingsModal()
+  modelSettingsOverlay.classList.add('active')
+  if (modelProviderGroupSelect.value === 'vllm') {
+    vllmModelIdInput.focus()
+  } else {
+    modelProviderModelSelect.focus()
+  }
+})
+
+modelProviderGroupSelect.addEventListener('change', () => {
+  refreshProviderPresetModels()
+  updateModelSettingsVisibilityByProvider()
+  void refreshProviderAuthPreview()
+})
+
+modelProviderModelAdd.addEventListener('click', () => {
+  void (async () => {
+    const provider = modelProviderGroupSelect.value
+    const selectedModel = provider === 'vllm'
+      ? vllmModelIdInput.value.trim()
+      : modelProviderModelSelect.value.trim()
+    if (!selectedModel) return
+
+    const apiKey = providerApiKeyInput.value.trim()
+    if (apiKey && apiKey !== currentProviderMaskedKey) {
+      const saved = await window.api.saveProviderAuth(provider as ProviderName, { apiKey })
+      if (!saved.ok) {
+        addMessage('assistant', `오류: API 키 저장 실패 ${saved.error ?? ''}`.trim())
+        return
+      }
+      await refreshProviderAuthPreview()
+    }
+
+    const res = await window.api.saveModelSettings({
+      selectedProvider: provider as 'openai' | 'anthropic' | 'google' | 'vllm',
+      selectedModelId: selectedModel,
+      openaiModelId: provider === 'openai' ? selectedModel : undefined,
+      anthropicModelId: provider === 'anthropic' ? selectedModel : undefined,
+      googleModelId: provider === 'google' ? selectedModel : undefined,
+      vllmModelId: provider === 'vllm' ? selectedModel : undefined,
+      vllmBaseUrl: provider === 'vllm' ? vllmBaseUrlInput.value.trim() : undefined,
+      openaiUseCustomBaseUrl: false,
+      openaiBaseUrl: '',
+    })
+    if (!res.ok) {
+      addMessage('assistant', '오류: 제공사 모델 적용에 실패했습니다.')
+      return
+    }
+    renderModelSelector(res.models, res.currentModel)
+    addMessage('assistant', `${provider.toUpperCase()} 모델이 ${selectedModel}(으)로 적용되었습니다.`)
+  })()
+})
+
+modelSettingsSave.addEventListener('click', async () => {
+  const provider = modelProviderGroupSelect.value as 'openai' | 'anthropic' | 'google' | 'vllm'
+  const selectedModel = provider === 'vllm'
+    ? vllmModelIdInput.value.trim()
+    : modelProviderModelSelect.value.trim()
+  if (!selectedModel) {
+    addMessage('assistant', '오류: 선택된 모델이 없습니다. 모델을 선택(또는 입력)해 주세요.')
+    return
+  }
+  const apiKey = providerApiKeyInput.value.trim()
+  if (apiKey && apiKey !== currentProviderMaskedKey) {
+    const saved = await window.api.saveProviderAuth(provider as ProviderName, { apiKey })
+    if (!saved.ok) {
+      addMessage('assistant', `오류: API 키 저장 실패 ${saved.error ?? ''}`.trim())
+      return
+    }
+    await refreshProviderAuthPreview()
+  }
+
+  const res = await window.api.saveModelSettings({
+    selectedProvider: provider,
+    selectedModelId: selectedModel,
+    openaiModelId: provider === 'openai' ? selectedModel : undefined,
+    anthropicModelId: provider === 'anthropic' ? selectedModel : undefined,
+    googleModelId: provider === 'google' ? selectedModel : undefined,
+    vllmModelId: provider === 'vllm' ? selectedModel : undefined,
+    vllmBaseUrl: provider === 'vllm' ? vllmBaseUrlInput.value.trim() : undefined,
+    openaiUseCustomBaseUrl: false,
+    openaiBaseUrl: '',
+  })
+  if (!res.ok) {
+    addMessage('assistant', '오류: 모델 설정 저장에 실패했습니다.')
+    return
+  }
+  renderModelSelector(res.models, res.currentModel)
+  modelSettingsOverlay.classList.remove('active')
+  addMessage('assistant', '모델 설정이 저장되었습니다.')
+})
+
+modelSettingsCancel.addEventListener('click', () => {
+  modelSettingsOverlay.classList.remove('active')
+})
+
+modelSettingsOverlay.addEventListener('click', (e) => {
+  if (e.target === modelSettingsOverlay) modelSettingsOverlay.classList.remove('active')
 })
 
 // ── 채팅 vs 태스크 뷰 ─────────────────────────────────────────────────────────
@@ -543,15 +775,109 @@ function makeThreadTitleFromAssistant(text: string): string {
   return (firstLine || '새 스레드').slice(0, 50)
 }
 
+type ProviderName = 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
+
+function authUiText(provider: ProviderName): { title: string; help: string; placeholder: string } {
+  if (provider === 'anthropic') {
+    return {
+      title: 'Claude API 키 입력',
+      help: 'Anthropic API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+      placeholder: '예: sk-ant-...',
+    }
+  }
+  if (provider === 'dify') {
+    return {
+      title: 'Dify 인증 입력',
+      help: 'Dify API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+      placeholder: '예: app-...',
+    }
+  }
+  if (provider === 'google') {
+    return {
+      title: 'Google API 키 입력',
+      help: 'Google Gemini API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+      placeholder: '예: AIza...',
+    }
+  }
+  if (provider === 'vllm') {
+    return {
+      title: 'vLLM API 키 입력 (선택)',
+      help: 'vLLM 서버가 인증을 요구하지 않으면 입력하지 않아도 됩니다. 필요할 때만 입력하세요.',
+      placeholder: '선택 입력',
+    }
+  }
+  return {
+    title: 'OpenAI API 키 입력',
+    help: 'OpenAI API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+    placeholder: '예: sk-...',
+  }
+}
+
+function openAuthModal(provider: ProviderName): Promise<string | null> {
+  return new Promise((resolve) => {
+    const ui = authUiText(provider)
+    authModalTitle.textContent = ui.title
+    authHelp.textContent = ui.help
+    authTokenInput.placeholder = ui.placeholder
+    authTokenInput.value = ''
+    authModalOverlay.classList.add('active')
+
+    const close = (token: string | null): void => {
+      authModalOverlay.classList.remove('active')
+      authTokenInput.value = ''
+      authCancel.removeEventListener('click', onCancel)
+      authSubmit.removeEventListener('click', onSubmit)
+      authModalOverlay.removeEventListener('click', onOverlayClick)
+      resolve(token)
+    }
+
+    const onCancel = (): void => close(null)
+    const onSubmit = (): void => {
+      const token = authTokenInput.value.trim()
+      if (!token) {
+        authTokenInput.focus()
+        return
+      }
+      close(token)
+    }
+    const onOverlayClick = (e: MouseEvent): void => {
+      if (e.target === authModalOverlay) close(null)
+    }
+
+    authCancel.addEventListener('click', onCancel)
+    authSubmit.addEventListener('click', onSubmit)
+    authModalOverlay.addEventListener('click', onOverlayClick)
+    setTimeout(() => authTokenInput.focus(), 0)
+  })
+}
+
+async function ensureProviderCredential(provider: ProviderName): Promise<boolean> {
+  if (provider === 'vllm') return true
+  const status = await window.api.getProviderAuthStatus(provider)
+  if (status.connected) return true
+
+  const token = await openAuthModal(provider)
+  if (!token) return false
+
+  const save = await window.api.saveProviderAuth(provider, { apiKey: token })
+  if (!save.ok) {
+    addMessage('assistant', `오류: 인증 저장 실패 ${save.error ?? ''}`.trim())
+    return false
+  }
+
+  const recheck = await window.api.getProviderAuthStatus(provider)
+  return recheck.connected
+}
+
 async function sendMessage(): Promise<void> {
   const text = inputEl.value.trim()
   if (!text || isThinking || isSending) return
   isSending = true
 
-  if (currentProvider === 'openai') {
-    const auth = await window.api.getProviderAuthStatus('openai')
-    if (!auth.connected) {
-      addMessage('assistant', '오류: OpenAI API 키가 없습니다. `.env`의 `OPENAI_API_KEY`를 설정해 주세요.')
+  if (currentProvider === 'openai' || currentProvider === 'anthropic' || currentProvider === 'google' || currentProvider === 'dify' || currentProvider === 'vllm') {
+    const ok = await ensureProviderCredential(currentProvider)
+    if (!ok) {
+      addMessage('assistant', '인증 정보가 없어 요청을 시작하지 않았습니다. 키를 입력하면 바로 사용할 수 있습니다.')
       isSending = false
       return
     }
@@ -866,7 +1192,11 @@ window.api.initMCP().then(async (res: any) => {
     updateFolderDisplay(folder.path)
   } else {
     dot.className = 'status-dot error'
-    statusText.textContent = `연결 실패`
+    statusText.textContent = `연결 실패 (채팅은 시도 가능)`
+    inputEl.disabled = false
+    sendBtn.disabled = false
+    inputEl.focus()
+    addMessage('assistant', `MCP 초기화 실패: ${res.error ?? '원인 미상'}\nMCP 없이도 채팅은 시도할 수 있습니다.`)
   }
 })
 

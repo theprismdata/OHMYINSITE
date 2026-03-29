@@ -49,7 +49,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
  * 실행: node dist/mcp-server.js
  */
 const dotenv = __importStar(require("dotenv"));
-dotenv.config({ override: true });
 const node_http_1 = __importDefault(require("node:http"));
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -58,6 +57,29 @@ const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const streamableHttp_js_1 = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const zod_1 = require("zod");
 const docs_tools_1 = require("./docs-tools");
+function loadEnvFile() {
+    const candidates = [
+        process.env.ENV_FILE?.trim(),
+        node_path_1.default.join(process.cwd(), '.env'),
+        node_path_1.default.join(node_path_1.default.dirname(process.execPath), '.env'),
+        (process.resourcesPath ? node_path_1.default.join(process.resourcesPath, '.env') : null),
+        (process.env.HOME ? node_path_1.default.join(process.env.HOME, 'Library', 'Application Support', 'ohmyinsite', '.env') : null),
+    ]
+        .filter((p) => !!p);
+    for (const p of candidates) {
+        try {
+            if (!node_fs_1.default.existsSync(p))
+                continue;
+            dotenv.config({ path: p, override: true });
+            return;
+        }
+        catch {
+            // continue
+        }
+    }
+    dotenv.config({ override: true });
+}
+loadEnvFile();
 const PORT = parseInt(process.env.MCP_PORT ?? '8001', 10);
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY ?? '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID ?? '';

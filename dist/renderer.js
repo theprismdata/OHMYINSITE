@@ -19,6 +19,18 @@ const docPanelContent = document.getElementById('doc-panel-content');
 const docPanelClose = document.getElementById('doc-panel-close');
 const modelSelect = document.getElementById('model-select');
 const modelBadge = document.getElementById('model-provider-badge');
+const modelSettingsBtn = document.getElementById('model-settings-btn');
+const modelSettingsOverlay = document.getElementById('model-settings-overlay');
+const vllmSection = document.getElementById('openai-compatible-section');
+const vllmModelIdInput = document.getElementById('vllm-model-id-input');
+const vllmBaseUrlInput = document.getElementById('vllm-base-url-input');
+const modelProviderGroupSelect = document.getElementById('model-provider-group-select');
+const modelProviderModelSelect = document.getElementById('model-provider-model-select');
+const modelProviderModelAdd = document.getElementById('model-provider-model-add');
+const providerApiKeyLabel = document.getElementById('provider-api-key-label');
+const providerApiKeyInput = document.getElementById('provider-api-key-input');
+const modelSettingsCancel = document.getElementById('model-settings-cancel');
+const modelSettingsSave = document.getElementById('model-settings-save');
 const taskList = document.getElementById('task-list');
 const newTaskBtn = document.getElementById('new-task-btn');
 const taskModalOverlay = document.getElementById('task-modal-overlay');
@@ -26,6 +38,12 @@ const taskTitleInput = document.getElementById('task-title-input');
 const taskPromptInput = document.getElementById('task-prompt-input');
 const modalCancel = document.getElementById('modal-cancel');
 const modalSubmit = document.getElementById('modal-submit');
+const authModalOverlay = document.getElementById('auth-modal-overlay');
+const authModalTitle = authModalOverlay.querySelector('h3');
+const authHelp = document.getElementById('auth-help');
+const authTokenInput = document.getElementById('auth-token-input');
+const authCancel = document.getElementById('auth-cancel');
+const authSubmit = document.getElementById('auth-submit');
 const chatView = document.getElementById('chat-view');
 const taskDetailView = document.getElementById('task-detail-view');
 const taskDetailBack = document.getElementById('task-detail-back');
@@ -46,6 +64,14 @@ let currentThreadId = null;
 let currentTaskId = null;
 const taskMap = new Map();
 const collapsedDirPaths = new Set();
+let modelSettingsLoaded = false;
+let currentProviderMaskedKey = '';
+const PROVIDER_MODEL_PRESETS = {
+    openai: ['gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini'],
+    anthropic: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    google: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+    vllm: [],
+};
 window.api.getAppMeta().then((meta) => {
     const appTitle = (meta?.title ?? '').trim() || 'OHMYINSITE';
     document.title = appTitle;
@@ -76,10 +102,10 @@ function showDocPreview(title, text) {
 }
 // ── 모델 셀렉터 ───────────────────────────────────────────────────────────────
 async function initModelSelector() {
-    const [models, current] = await Promise.all([
-        window.api.getModels(),
-        window.api.getCurrentModel(),
-    ]);
+    const [models, current] = await Promise.all([window.api.getModels(), window.api.getCurrentModel()]);
+    renderModelSelector(models, current);
+}
+function renderModelSelector(models, current) {
     modelSelect.innerHTML = '';
     for (const m of models) {
         const opt = document.createElement('option');
@@ -92,8 +118,81 @@ async function initModelSelector() {
     currentProvider = current.provider;
     updateModelBadge(current.provider);
 }
+function refreshProviderPresetModels() {
+    const provider = modelProviderGroupSelect.value;
+    const presets = PROVIDER_MODEL_PRESETS[provider] ?? [];
+    modelProviderModelSelect.innerHTML = '';
+    for (const id of presets) {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = id;
+        modelProviderModelSelect.appendChild(opt);
+    }
+}
+function updateModelSettingsVisibilityByProvider() {
+    const provider = modelProviderGroupSelect.value;
+    const isVllm = provider === 'vllm';
+    vllmSection.style.display = isVllm ? '' : 'none';
+    modelProviderModelSelect.disabled = isVllm;
+    modelProviderModelAdd.textContent = isVllm ? '적용' : '적용';
+    if (provider === 'anthropic') {
+        providerApiKeyLabel.textContent = 'Anthropic API 키 (선택)';
+        providerApiKeyInput.placeholder = '예: sk-ant-...';
+    }
+    else if (provider === 'google') {
+        providerApiKeyLabel.textContent = 'Google API 키 (선택)';
+        providerApiKeyInput.placeholder = '예: AIza...';
+    }
+    else if (provider === 'vllm') {
+        providerApiKeyLabel.textContent = 'vLLM API 키 (선택)';
+        providerApiKeyInput.placeholder = '필요할 때만 입력';
+    }
+    else {
+        providerApiKeyLabel.textContent = 'OpenAI API 키 (선택)';
+        providerApiKeyInput.placeholder = '예: sk-...';
+    }
+}
+async function refreshProviderAuthPreview() {
+    const provider = modelProviderGroupSelect.value;
+    const preview = await window.api.getProviderAuthPreview(provider);
+    currentProviderMaskedKey = preview.masked ?? '';
+    providerApiKeyInput.value = currentProviderMaskedKey;
+}
+async function loadModelSettingsModal() {
+    const settings = await window.api.getModelSettings();
+    const provider = settings.selectedProvider;
+    modelProviderGroupSelect.value = ['openai', 'anthropic', 'google', 'vllm'].includes(provider)
+        ? provider
+        : 'openai';
+    refreshProviderPresetModels();
+    const providerModelMap = {
+        openai: settings.openaiModelId,
+        anthropic: settings.anthropicModelId,
+        google: settings.googleModelId,
+        vllm: settings.vllmModelId,
+    };
+    const mapped = providerModelMap[modelProviderGroupSelect.value];
+    if (mapped) {
+        const exists = Array.from(modelProviderModelSelect.options).some((o) => o.value === mapped);
+        if (exists)
+            modelProviderModelSelect.value = mapped;
+    }
+    vllmModelIdInput.value = settings.vllmModelId ?? 'CEN-35B';
+    vllmBaseUrlInput.value = settings.vllmBaseUrl ?? '';
+    updateModelSettingsVisibilityByProvider();
+    await refreshProviderAuthPreview();
+    modelSettingsLoaded = true;
+}
 function updateModelBadge(provider) {
-    modelBadge.textContent = provider === 'anthropic' ? 'Anthropic' : provider === 'dify' ? 'Dify' : 'OpenAI';
+    modelBadge.textContent = provider === 'anthropic'
+        ? 'Anthropic'
+        : provider === 'google'
+            ? 'Google'
+            : provider === 'vllm'
+                ? 'vLLM'
+                : provider === 'dify'
+                    ? 'Dify'
+                    : 'OpenAI';
     modelBadge.className = `model-provider-badge ${provider}`;
     // Fix: id is still there but className needs the right value
     modelBadge.setAttribute('id', 'model-provider-badge');
@@ -116,6 +215,101 @@ modelSelect.addEventListener('change', async () => {
         currentProvider = selected.provider;
         updateModelBadge(selected.provider);
     }
+});
+modelSettingsBtn.addEventListener('click', async () => {
+    await loadModelSettingsModal();
+    modelSettingsOverlay.classList.add('active');
+    if (modelProviderGroupSelect.value === 'vllm') {
+        vllmModelIdInput.focus();
+    }
+    else {
+        modelProviderModelSelect.focus();
+    }
+});
+modelProviderGroupSelect.addEventListener('change', () => {
+    refreshProviderPresetModels();
+    updateModelSettingsVisibilityByProvider();
+    void refreshProviderAuthPreview();
+});
+modelProviderModelAdd.addEventListener('click', () => {
+    void (async () => {
+        const provider = modelProviderGroupSelect.value;
+        const selectedModel = provider === 'vllm'
+            ? vllmModelIdInput.value.trim()
+            : modelProviderModelSelect.value.trim();
+        if (!selectedModel)
+            return;
+        const apiKey = providerApiKeyInput.value.trim();
+        if (apiKey && apiKey !== currentProviderMaskedKey) {
+            const saved = await window.api.saveProviderAuth(provider, { apiKey });
+            if (!saved.ok) {
+                addMessage('assistant', `오류: API 키 저장 실패 ${saved.error ?? ''}`.trim());
+                return;
+            }
+            await refreshProviderAuthPreview();
+        }
+        const res = await window.api.saveModelSettings({
+            selectedProvider: provider,
+            selectedModelId: selectedModel,
+            openaiModelId: provider === 'openai' ? selectedModel : undefined,
+            anthropicModelId: provider === 'anthropic' ? selectedModel : undefined,
+            googleModelId: provider === 'google' ? selectedModel : undefined,
+            vllmModelId: provider === 'vllm' ? selectedModel : undefined,
+            vllmBaseUrl: provider === 'vllm' ? vllmBaseUrlInput.value.trim() : undefined,
+            openaiUseCustomBaseUrl: false,
+            openaiBaseUrl: '',
+        });
+        if (!res.ok) {
+            addMessage('assistant', '오류: 제공사 모델 적용에 실패했습니다.');
+            return;
+        }
+        renderModelSelector(res.models, res.currentModel);
+        addMessage('assistant', `${provider.toUpperCase()} 모델이 ${selectedModel}(으)로 적용되었습니다.`);
+    })();
+});
+modelSettingsSave.addEventListener('click', async () => {
+    const provider = modelProviderGroupSelect.value;
+    const selectedModel = provider === 'vllm'
+        ? vllmModelIdInput.value.trim()
+        : modelProviderModelSelect.value.trim();
+    if (!selectedModel) {
+        addMessage('assistant', '오류: 선택된 모델이 없습니다. 모델을 선택(또는 입력)해 주세요.');
+        return;
+    }
+    const apiKey = providerApiKeyInput.value.trim();
+    if (apiKey && apiKey !== currentProviderMaskedKey) {
+        const saved = await window.api.saveProviderAuth(provider, { apiKey });
+        if (!saved.ok) {
+            addMessage('assistant', `오류: API 키 저장 실패 ${saved.error ?? ''}`.trim());
+            return;
+        }
+        await refreshProviderAuthPreview();
+    }
+    const res = await window.api.saveModelSettings({
+        selectedProvider: provider,
+        selectedModelId: selectedModel,
+        openaiModelId: provider === 'openai' ? selectedModel : undefined,
+        anthropicModelId: provider === 'anthropic' ? selectedModel : undefined,
+        googleModelId: provider === 'google' ? selectedModel : undefined,
+        vllmModelId: provider === 'vllm' ? selectedModel : undefined,
+        vllmBaseUrl: provider === 'vllm' ? vllmBaseUrlInput.value.trim() : undefined,
+        openaiUseCustomBaseUrl: false,
+        openaiBaseUrl: '',
+    });
+    if (!res.ok) {
+        addMessage('assistant', '오류: 모델 설정 저장에 실패했습니다.');
+        return;
+    }
+    renderModelSelector(res.models, res.currentModel);
+    modelSettingsOverlay.classList.remove('active');
+    addMessage('assistant', '모델 설정이 저장되었습니다.');
+});
+modelSettingsCancel.addEventListener('click', () => {
+    modelSettingsOverlay.classList.remove('active');
+});
+modelSettingsOverlay.addEventListener('click', (e) => {
+    if (e.target === modelSettingsOverlay)
+        modelSettingsOverlay.classList.remove('active');
 });
 // ── 채팅 vs 태스크 뷰 ─────────────────────────────────────────────────────────
 function showChatView() {
@@ -431,15 +625,102 @@ function makeThreadTitleFromAssistant(text) {
     const firstLine = cleaned.split('\n')[0]?.trim() ?? '';
     return (firstLine || '새 스레드').slice(0, 50);
 }
+function authUiText(provider) {
+    if (provider === 'anthropic') {
+        return {
+            title: 'Claude API 키 입력',
+            help: 'Anthropic API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+            placeholder: '예: sk-ant-...',
+        };
+    }
+    if (provider === 'dify') {
+        return {
+            title: 'Dify 인증 입력',
+            help: 'Dify API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+            placeholder: '예: app-...',
+        };
+    }
+    if (provider === 'google') {
+        return {
+            title: 'Google API 키 입력',
+            help: 'Google Gemini API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+            placeholder: '예: AIza...',
+        };
+    }
+    if (provider === 'vllm') {
+        return {
+            title: 'vLLM API 키 입력 (선택)',
+            help: 'vLLM 서버가 인증을 요구하지 않으면 입력하지 않아도 됩니다. 필요할 때만 입력하세요.',
+            placeholder: '선택 입력',
+        };
+    }
+    return {
+        title: 'OpenAI API 키 입력',
+        help: 'OpenAI API 키를 입력하면 로컬 설정에 저장되어 다음부터 바로 사용됩니다.',
+        placeholder: '예: sk-...',
+    };
+}
+function openAuthModal(provider) {
+    return new Promise((resolve) => {
+        const ui = authUiText(provider);
+        authModalTitle.textContent = ui.title;
+        authHelp.textContent = ui.help;
+        authTokenInput.placeholder = ui.placeholder;
+        authTokenInput.value = '';
+        authModalOverlay.classList.add('active');
+        const close = (token) => {
+            authModalOverlay.classList.remove('active');
+            authTokenInput.value = '';
+            authCancel.removeEventListener('click', onCancel);
+            authSubmit.removeEventListener('click', onSubmit);
+            authModalOverlay.removeEventListener('click', onOverlayClick);
+            resolve(token);
+        };
+        const onCancel = () => close(null);
+        const onSubmit = () => {
+            const token = authTokenInput.value.trim();
+            if (!token) {
+                authTokenInput.focus();
+                return;
+            }
+            close(token);
+        };
+        const onOverlayClick = (e) => {
+            if (e.target === authModalOverlay)
+                close(null);
+        };
+        authCancel.addEventListener('click', onCancel);
+        authSubmit.addEventListener('click', onSubmit);
+        authModalOverlay.addEventListener('click', onOverlayClick);
+        setTimeout(() => authTokenInput.focus(), 0);
+    });
+}
+async function ensureProviderCredential(provider) {
+    if (provider === 'vllm')
+        return true;
+    const status = await window.api.getProviderAuthStatus(provider);
+    if (status.connected)
+        return true;
+    const token = await openAuthModal(provider);
+    if (!token)
+        return false;
+    const save = await window.api.saveProviderAuth(provider, { apiKey: token });
+    if (!save.ok) {
+        addMessage('assistant', `오류: 인증 저장 실패 ${save.error ?? ''}`.trim());
+        return false;
+    }
+    const recheck = await window.api.getProviderAuthStatus(provider);
+    return recheck.connected;
+}
 async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text || isThinking || isSending)
         return;
     isSending = true;
-    if (currentProvider === 'openai') {
-        const auth = await window.api.getProviderAuthStatus('openai');
-        if (!auth.connected) {
-            addMessage('assistant', '오류: OpenAI API 키가 없습니다. `.env`의 `OPENAI_API_KEY`를 설정해 주세요.');
+    if (currentProvider === 'openai' || currentProvider === 'anthropic' || currentProvider === 'google' || currentProvider === 'dify' || currentProvider === 'vllm') {
+        const ok = await ensureProviderCredential(currentProvider);
+        if (!ok) {
+            addMessage('assistant', '인증 정보가 없어 요청을 시작하지 않았습니다. 키를 입력하면 바로 사용할 수 있습니다.');
             isSending = false;
             return;
         }
@@ -753,7 +1034,11 @@ window.api.initMCP().then(async (res) => {
     }
     else {
         dot.className = 'status-dot error';
-        statusText.textContent = `연결 실패`;
+        statusText.textContent = `연결 실패 (채팅은 시도 가능)`;
+        inputEl.disabled = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+        addMessage('assistant', `MCP 초기화 실패: ${res.error ?? '원인 미상'}\nMCP 없이도 채팅은 시도할 수 있습니다.`);
     }
 });
 // 모델 셀렉터 초기화

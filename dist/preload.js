@@ -36,7 +36,11 @@ electron_1.contextBridge.exposeInMainWorld('api', {
     getModels: () => electron_1.ipcRenderer.invoke('get-models'),
     getCurrentModel: () => electron_1.ipcRenderer.invoke('get-current-model'),
     setModel: (modelId) => electron_1.ipcRenderer.invoke('set-model', modelId),
+    getModelSettings: () => electron_1.ipcRenderer.invoke('get-model-settings'),
+    saveModelSettings: (input) => electron_1.ipcRenderer.invoke('save-model-settings', input),
     getProviderAuthStatus: (provider) => electron_1.ipcRenderer.invoke('get-provider-auth-status', provider),
+    getProviderAuthPreview: (provider) => electron_1.ipcRenderer.invoke('get-provider-auth-preview', provider),
+    saveProviderAuth: (provider, input) => electron_1.ipcRenderer.invoke('save-provider-auth', { provider, ...input }),
     // ── 태스크 ───────────────────────────────────────────────────────────────────
     createThread: (title, agentId) => electron_1.ipcRenderer.invoke('create-thread', { title, agentId }),
     updateTaskTitle: (taskId, title) => electron_1.ipcRenderer.invoke('update-task-title', { taskId, title }),

@@ -39,7 +39,7 @@ export interface DocumentContent {
 
 // ── 모델 ──────────────────────────────────────────────────────────────────────
 
-export type ModelProvider = 'openai' | 'anthropic' | 'dify'
+export type ModelProvider = 'openai' | 'anthropic' | 'google' | 'vllm' | 'dify'
 
 export interface ModelConfig {
   id: string

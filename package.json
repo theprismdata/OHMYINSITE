@@ -8,7 +8,8 @@
     "start": "npm run build && electron .",
     "dev": "electron .",
     "mcp-server": "tsc -p tsconfig.json && node dist/mcp-server.js",
-    "mcp-server:dev": "node dist/mcp-server.js"
+    "mcp-server:dev": "node dist/mcp-server.js",
+    "dist:dmg": "npm run build && electron-builder --mac dmg --arm64"
   },
   "author": "theprismdata",
   "license": "ISC",
@@ -16,7 +17,34 @@
     "@types/node": "^25.5.0",
     "@types/pako": "^2.0.4",
     "electron": "^35.0.0",
+    "electron-builder": "^24.13.3",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.theprismdata.ohmyinsite",
+    "productName": "OHMYINSITE",
+    "files": [
+      "dist/**/*",
+      "index.html",
+      "package.json",
+      "assets/**/*"
+    ],
+    "directories": {
+      "output": "release-dmg"
+    },
+    "asar": true,
+    "mac": {
+      "icon": "assets/icon/icon.icns",
+      "target": [
+        "dmg"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

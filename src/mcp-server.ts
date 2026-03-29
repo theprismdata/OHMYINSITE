@@ -11,7 +11,6 @@
  * 실행: node dist/mcp-server.js
  */
 import * as dotenv from 'dotenv'
-dotenv.config({ override: true })
 
 import http from 'node:http'
 import fs from 'node:fs'
@@ -28,6 +27,31 @@ import {
   setDocsRoot,
   getDocsRoot,
 } from './docs-tools'
+
+function loadEnvFile(): void {
+  const candidates = [
+    process.env.ENV_FILE?.trim(),
+    path.join(process.cwd(), '.env'),
+    path.join(path.dirname(process.execPath), '.env'),
+    (process.resourcesPath ? path.join(process.resourcesPath, '.env') : null),
+    (process.env.HOME ? path.join(process.env.HOME, 'Library', 'Application Support', 'ohmyinsite', '.env') : null),
+  ]
+    .filter((p): p is string => !!p)
+
+  for (const p of candidates) {
+    try {
+      if (!fs.existsSync(p)) continue
+      dotenv.config({ path: p, override: true })
+      return
+    } catch {
+      // continue
+    }
+  }
+
+  dotenv.config({ override: true })
+}
+
+loadEnvFile()
 
 const PORT = parseInt(process.env.MCP_PORT ?? '8001', 10)
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY ?? ''

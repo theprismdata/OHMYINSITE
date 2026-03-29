@@ -83,6 +83,17 @@
     }
     #model-select:hover { border-color: var(--accent); }
     #model-select option { background: #1a1a30; }
+    #model-settings-btn {
+      -webkit-app-region: no-drag;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 11px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+    #model-settings-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 
     #model-provider-badge {
       font-size: 10px;
@@ -93,6 +104,8 @@
     }
     #model-provider-badge.openai  { background: #0a3a0a; color: #4db86a; border: 1px solid #1a5a1a; }
     #model-provider-badge.anthropic { background: #1a0a2a; color: #b06af8; border: 1px solid #3a1a5a; }
+    #model-provider-badge.google { background: #2a1f0a; color: #f2c14e; border: 1px solid #5c4518; }
+    #model-provider-badge.vllm { background: #0a2430; color: #62c8f1; border: 1px solid #1d4b60; }
     #model-provider-badge.dify { background: #0a2a3a; color: #6ad4f8; border: 1px solid #1a4f66; }
 
     #status-indicator {
@@ -860,6 +873,73 @@
     }
     #auth-submit:hover { background: #1e3a6f; }
 
+    /* ── 모델 설정 모달 ─────────────────────────────────────────────────── */
+    #model-settings-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1150;
+    }
+    #model-settings-overlay.active { display: flex; }
+    #model-settings-modal {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-light);
+      border-radius: 14px;
+      width: 540px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    }
+    #model-settings-modal h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    #model-settings-help {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+    #model-use-custom-wrap {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    #model-settings-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    #model-settings-cancel {
+      background: none;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 13px;
+      padding: 8px 18px;
+      cursor: pointer;
+    }
+    #model-settings-cancel:hover { border-color: #555; color: var(--text-primary); }
+    #model-settings-save {
+      background: var(--accent-dim);
+      border: 1px solid #3a6aaf;
+      border-radius: var(--radius-sm);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 20px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    #model-settings-save:hover { background: #1e3a6f; }
+
     /* ── 스크롤바 공통 ───────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -880,6 +960,7 @@
     <select id="model-select">
       <option value="gpt-4.1">GPT-4.1</option>
     </select>
+    <button id="model-settings-btn" title="모델 설정">모델 설정</button>
   </div>
 
   <!-- 앱 컨테이너 -->
@@ -988,6 +1069,45 @@
       <div id="auth-modal-actions">
         <button id="auth-cancel">취소</button>
         <button id="auth-submit">저장 후 계속</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 모델 설정 모달 -->
+  <div id="model-settings-overlay">
+    <div id="model-settings-modal">
+      <h3>모델 설정</h3>
+      <p id="model-settings-help">제공사를 선택하면 해당 제공사의 모델 목록이 표시됩니다. vLLM은 모델명과 주소를 직접 입력합니다.</p>
+      <div class="modal-field">
+        <label>제공사 기본 모델 선택</label>
+        <div style="display:flex;gap:8px;">
+          <select id="model-provider-group-select" style="flex:0 0 160px;">
+            <option value="vllm">vLLM</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="google">Google</option>
+          </select>
+          <select id="model-provider-model-select" style="flex:1;"></select>
+          <button id="model-provider-model-add" type="button" style="flex:0 0 72px;">추가</button>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label id="provider-api-key-label">제공사 API 키 (선택)</label>
+        <input id="provider-api-key-input" type="password" placeholder="">
+      </div>
+      <div id="openai-compatible-section">
+        <div class="modal-field">
+          <label>vLLM 모델명</label>
+          <input id="vllm-model-id-input" type="text" placeholder="예: CEN-35B">
+        </div>
+        <div class="modal-field">
+          <label>vLLM 주소</label>
+          <input id="vllm-base-url-input" type="text" placeholder="예: http://192.168.0.2:8080/v1">
+        </div>
+      </div>
+      <div id="model-settings-actions">
+        <button id="model-settings-cancel">취소</button>
+        <button id="model-settings-save">저장</button>
       </div>
     </div>
   </div>
