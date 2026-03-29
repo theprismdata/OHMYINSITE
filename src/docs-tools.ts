@@ -7,7 +7,8 @@ import pako from 'pako'
 import mammoth from 'mammoth'
 import type { DocInfo, SearchResult, DocumentContent } from './types'
 
-let DOCS_ROOT = '/Users/prismdata/Library/CloudStorage/OneDrive-ITCEN/MCP-DRIVE'
+const DEFAULT_DOCS_ROOT = path.join(process.cwd(), 'MCP-DRIVE')
+let DOCS_ROOT = process.env.DOCS_ROOT?.trim() || DEFAULT_DOCS_ROOT
 const SUPPORTED_EXTS = new Set(['.pdf', '.pptx', '.ppt', '.hwp', '.hwpx', '.docx', '.doc'])
 
 export function setDocsRoot(newPath: string): void {

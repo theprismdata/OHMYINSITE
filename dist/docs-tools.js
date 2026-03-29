@@ -49,7 +49,8 @@ const jszip_1 = __importDefault(require("jszip"));
 const cfb = __importStar(require("cfb"));
 const pako_1 = __importDefault(require("pako"));
 const mammoth_1 = __importDefault(require("mammoth"));
-let DOCS_ROOT = '/Users/prismdata/Library/CloudStorage/OneDrive-ITCEN/MCP-DRIVE';
+const DEFAULT_DOCS_ROOT = path_1.default.join(process.cwd(), 'MCP-DRIVE');
+let DOCS_ROOT = process.env.DOCS_ROOT?.trim() || DEFAULT_DOCS_ROOT;
 const SUPPORTED_EXTS = new Set(['.pdf', '.pptx', '.ppt', '.hwp', '.hwpx', '.docx', '.doc']);
 function setDocsRoot(newPath) {
     DOCS_ROOT = newPath;

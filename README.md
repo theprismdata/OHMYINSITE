@@ -1,4 +1,4 @@
-# 📚 CENInsight - 기술문서 AI 어시스턴트
+# 📚 OHMYINSITE - 기술문서 AI 어시스턴트
 
 Electron 기반 기술문서 분석 AI 채팅 애플리케이션 & MCP 서버
 
@@ -17,7 +17,7 @@ Electron 기반 기술문서 분석 AI 채팅 애플리케이션 & MCP 서버
 ## 🏗️ 프로젝트 구조
 
 ```
-CENInsight/
+OHMYINSITE/
 ├── src/
 │   ├── main.ts           # Electron 메인 프로세스 (GUI 앱)
 │   ├── renderer.ts       # Electron 렌더러 프로세스 (UI 로직)
@@ -66,7 +66,7 @@ cp .env.example .env
 DIFY_MODE=true
 
 # 앱 제목 (오픈소스/사내용 브랜딩에 사용)
-APP_TITLE=CENInsight
+APP_TITLE=OHMYINSITE
 
 # Dify API 설정
 DIFY_API_URL=http://192.168.0.2:5001/v1

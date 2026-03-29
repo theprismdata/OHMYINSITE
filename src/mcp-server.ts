@@ -116,7 +116,7 @@ function runExecFile(
 
 function createMcpServer(): McpServer {
   const server = new McpServer({
-    name: 'ceninsight-docs',
+    name: 'ohmyinsite-docs',
     version: '1.0.0',
   })
 

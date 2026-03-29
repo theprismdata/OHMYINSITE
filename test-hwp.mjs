@@ -78,7 +78,7 @@ function extractTextFromHwp(filePath) {
   return extractedText;
 }
 
-const testFile = '/Users/prismdata/Library/CloudStorage/OneDrive-ITCEN/entec-업무자료/Arch그룹/intellicen-asset-doc/제안에셋/입찰공고/생성형 AI 기반 연구행정 업무지원서비스/[제안요청서] 생성형 AI 기반 연구행정 업무지원서비스 구축 사업.hwp';
+const testFile = process.argv[2] ?? './sample.hwp';
 
 try {
   const text = extractTextFromHwp(testFile);

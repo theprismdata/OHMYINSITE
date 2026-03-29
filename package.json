@@ -1,7 +1,7 @@
 {
-  "name": "ceninsight",
+  "name": "ohmyinsite",
   "version": "1.0.0",
-  "description": "CENInsight - Executive Technical Document RAG Assistant",
+  "description": "OHMYINSITE - Executive Technical Document RAG Assistant",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.renderer.json",
@@ -10,7 +10,7 @@
     "mcp-server": "tsc -p tsconfig.json && node dist/mcp-server.js",
     "mcp-server:dev": "node dist/mcp-server.js"
   },
-  "author": "ITCEN",
+  "author": "theprismdata",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^25.5.0",

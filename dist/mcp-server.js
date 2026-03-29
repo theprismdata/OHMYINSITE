@@ -133,7 +133,7 @@ function runExecFile(bin, args, timeoutMs) {
 }
 function createMcpServer() {
     const server = new mcp_js_1.McpServer({
-        name: 'ceninsight-docs',
+        name: 'ohmyinsite-docs',
         version: '1.0.0',
     });
     const tool = server.tool.bind(server);

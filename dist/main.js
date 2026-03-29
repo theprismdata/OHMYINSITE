@@ -45,7 +45,7 @@ const child_process_1 = require("child_process");
 const docs_tools_1 = require("./docs-tools");
 // ── 환경변수 ───────────────────────────────────────────────────────────────────
 const DIFY_MODE = (process.env.DIFY_MODE ?? 'false') === 'true';
-const APP_TITLE = process.env.APP_TITLE?.trim() || 'CENInsight';
+const APP_TITLE = process.env.APP_TITLE?.trim() || 'OHMYINSITE';
 const APP_ICON_PATH = process.env.APP_ICON_PATH?.trim() || '';
 const DIFY_API_URL = process.env.DIFY_API_URL ?? 'http://localhost/v1';
 const DIFY_API_KEY = process.env.DIFY_API_KEY ?? '';
@@ -315,7 +315,7 @@ let openaiTools = [];
 async function connectMcpClient() {
     const { Client } = await Promise.resolve().then(() => __importStar(require('@modelcontextprotocol/sdk/client/index.js')));
     const { StreamableHTTPClientTransport } = await Promise.resolve().then(() => __importStar(require('@modelcontextprotocol/sdk/client/streamableHttp.js')));
-    const client = new Client({ name: 'ceninsight', version: '1.0.0' });
+    const client = new Client({ name: 'ohmyinsite', version: '1.0.0' });
     const transport = new StreamableHTTPClientTransport(new URL(MCP_URL));
     try {
         await client.connect(transport);

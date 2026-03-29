@@ -47,14 +47,14 @@ let currentTaskId = null;
 const taskMap = new Map();
 const collapsedDirPaths = new Set();
 window.api.getAppMeta().then((meta) => {
-    const appTitle = (meta?.title ?? '').trim() || 'CENInsight';
+    const appTitle = (meta?.title ?? '').trim() || 'OHMYINSITE';
     document.title = appTitle;
     titlebarText.textContent = appTitle;
     welcomeTitle.textContent = appTitle;
 }).catch(() => {
-    document.title = 'CENInsight';
-    titlebarText.textContent = 'CENInsight';
-    welcomeTitle.textContent = 'CENInsight';
+    document.title = 'OHMYINSITE';
+    titlebarText.textContent = 'OHMYINSITE';
+    welcomeTitle.textContent = 'OHMYINSITE';
 });
 welcomeDesc.textContent = '질문을 입력하면 의도를 자동 분류해 문서/코드/제안서 모드로 처리합니다.';
 // ── 탭 전환 ───────────────────────────────────────────────────────────────────
