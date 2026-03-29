@@ -9,7 +9,9 @@
     "dev": "electron .",
     "mcp-server": "tsc -p tsconfig.json && node dist/mcp-server.js",
     "mcp-server:dev": "node dist/mcp-server.js",
-    "dist:dmg": "npm run build && electron-builder --mac dmg --arm64"
+    "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --config.directories.output=release-mac",
+    "dist:dmg": "npm run dist:mac",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --config.directories.output=release-win"
   },
   "author": "theprismdata",
   "license": "GPL-3.0-only",
@@ -30,7 +32,7 @@
       "assets/**/*"
     ],
     "directories": {
-      "output": "release-dmg"
+      "output": "release"
     },
     "asar": true,
     "mac": {
@@ -42,8 +44,19 @@
       "category": "public.app-category.productivity",
       "hardenedRuntime": false
     },
+    "win": {
+      "icon": "assets/icon/icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
     "dmg": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "installerIcon": "assets/icon/icon.ico",
+      "uninstallerIcon": "assets/icon/icon.ico"
     }
   },
   "dependencies": {
