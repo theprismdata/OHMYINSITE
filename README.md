@@ -69,7 +69,7 @@ DIFY_MODE=true
 APP_TITLE=CENInsight
 
 # Dify API 설정
-DIFY_API_URL=http://10.10.41.170:5001/v1
+DIFY_API_URL=http://192.168.0.2:5001/v1
 DIFY_API_KEY=app-your-api-key
 
 # vLLM 서버 설정
